@@ -3,13 +3,6 @@ use validify::{Validate, ValidationErrors};
 const MAX_CONST: usize = 10;
 const MIN_CONST: usize = 0;
 
-// Loose floating point comparison using EPSILON error bound
-macro_rules! assert_float {
-    ($e1:expr, $e2:expr) => {
-        assert!(($e2 - $e1).abs() < std::f64::EPSILON);
-    };
-}
-
 #[test]
 fn can_validate_range_ok() {
     #[derive(Debug, Validate)]
@@ -112,8 +105,8 @@ fn can_specify_code_for_range() {
     assert_eq!(errs.len(), 1);
     assert_eq!(errs[0].code(), "oops");
     assert_eq!(errs[0].params()["actual"], 11);
-    assert_float!(errs[0].params()["min"].as_f64().unwrap(), 5.0);
-    assert_float!(errs[0].params()["max"].as_f64().unwrap(), 10.0);
+    assert_eq!(errs[0].params()["min"].as_f64().unwrap(), 5.0);
+    assert_eq!(errs[0].params()["max"].as_f64().unwrap(), 10.0);
 }
 
 #[test]
@@ -143,13 +136,13 @@ fn can_pass_reference_as_validate() {
         num_field: f64,
     }
 
-    fn validate<T: Validate>(value: T) -> Result<(), ValidationErrors> {
+    fn validate<T: Validate>(value: &T) -> Result<(), ValidationErrors> {
         value.validate()
     }
 
     let val = TestStruct { num_field: 0.32 };
-    assert!(validate(val).is_ok());
+    assert!(validate(&val).is_ok());
 
     let val = TestStruct { num_field: 1.01 };
-    assert!(validate(val).is_err());
+    assert!(validate(&val).is_err());
 }

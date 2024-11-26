@@ -28,7 +28,6 @@ pub enum Validator {
     Length(Length),
     NonControlCharacter(NonControlChar),
     Required(Required),
-    MustMatch(MustMatch),
     Regex(Regex),
     Contains(Contains),
     Time(Time),
@@ -112,21 +111,6 @@ validation!(
     min: Option<ValueOrPath<f64>>,
     max: Option<ValueOrPath<f64>>
 );
-
-validation!(
-    MustMatch : "must_match";
-    value: syn::Ident
-);
-
-impl MustMatch {
-    pub fn new(id: syn::Ident) -> Self {
-        Self {
-            value: id,
-            code: None,
-            message: None,
-        }
-    }
-}
 
 validation!(
     Nested : "nested",

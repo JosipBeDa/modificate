@@ -1,10 +1,9 @@
-use crate::fields::FieldInfo;
 use crate::validate::parser::ValueOrPath;
 use crate::validate::validation::{
-    Contains, CreditCard, Custom, Describe, Email, In, Ip, Length, MustMatch, NonControlChar,
-    Phone, Range, Regex, Required, SchemaValidation, Time, TimeMultiplier, Url, Validator,
+    Contains, CreditCard, Custom, Describe, Email, In, Ip, Length, NonControlChar, Phone, Range,
+    Regex, Required, SchemaValidation, Time, TimeMultiplier, Url, Validator,
 };
-use proc_macro2::{self, TokenStream};
+use proc_macro2::TokenStream;
 use proc_macro_error::abort;
 use quote::quote;
 use syn::spanned::Spanned;
@@ -16,7 +15,7 @@ pub trait ValidationErrorTokens {
     where
         Self: Describe,
     {
-        let add_message_quoted = if let Some(ref m) = self.message() {
+        let message = if let Some(ref m) = self.message() {
             quote!(err.set_message(String::from(#m));)
         } else {
             quote!()
@@ -27,7 +26,7 @@ pub trait ValidationErrorTokens {
         quote!(
             let mut err = ::validify::ValidationError::new_field(#code);
             err.set_field(#field_name);
-            #add_message_quoted
+            #message
         )
     }
 }
@@ -50,7 +49,6 @@ impl_error! {
     Custom,
     NonControlChar,
     Required,
-    MustMatch,
     Regex,
     Contains,
     Time,
@@ -65,7 +63,7 @@ pub enum ValidationTokens {
 }
 
 /// Output the necessary tokens for schema validation when implementing `Validate`.
-pub fn quote_schema_validations(validation: &[SchemaValidation]) -> Vec<proc_macro2::TokenStream> {
+pub fn quote_schema_validation(validation: &[SchemaValidation]) -> Vec<proc_macro2::TokenStream> {
     validation
         .iter()
         .map(|v| {
@@ -79,38 +77,13 @@ pub fn quote_schema_validations(validation: &[SchemaValidation]) -> Vec<proc_mac
         .collect()
 }
 
-/// Output the necessary tokens for field validations when implementing `Validate`.
-pub fn quote_field_validations(fields: Vec<FieldInfo>) -> Vec<proc_macro2::TokenStream> {
-    let mut validations = vec![];
-
-    for field_info in fields {
-        let tokens = field_info.quote_validation();
-        validations.extend(tokens);
-    }
-
-    validations
-}
-
-/// Creates a token stream applying the modifiers based on the field annotations.
-pub(super) fn quote_field_modifiers(
-    fields: Vec<FieldInfo>,
-) -> (Vec<proc_macro2::TokenStream>, Vec<proc_macro2::TokenStream>) {
-    let mut modifications = vec![];
-    let mut nested_validifies = vec![];
-
-    for field_info in fields {
-        let (mods, nested) = field_info.quote_validifes();
-        modifications.extend(mods);
-        nested_validifies.extend(nested);
-    }
-
-    (modifications, nested_validifies)
-}
-
 impl Validator {
-    pub fn to_validify_tokens(&self, field_info: &crate::fields::FieldInfo) -> ValidationTokens {
+    pub fn to_validate_tokens(
+        &self,
+        field_info: &crate::fields::FieldInfo,
+        validator_param: TokenStream,
+    ) -> ValidationTokens {
         let field_name = field_info.name();
-        let validator_param = field_info.quote_validator_param();
 
         match self {
             Validator::Email(v) => {
@@ -157,21 +130,28 @@ impl Validator {
                 let tokens = v.to_validify_tokens(field_name, validator_param, false);
                 ValidationTokens::Normal(field_info.wrap_tokens_if_option(tokens))
             }
-            Validator::MustMatch(v) => {
-                let ident = field_info.field.ident.as_ref();
-                let validator_param = quote!(&self.#ident);
-                let tokens = v.to_validify_tokens(field_name, validator_param, false);
-                ValidationTokens::Normal(field_info.wrap_tokens_if_option(tokens))
-            }
             Validator::Required(v) => {
-                let ident = field_info.field.ident.as_ref();
-                let validator_param = quote!(&self.#ident);
+                let validator_param = field_info
+                    .ident_override
+                    .as_ref()
+                    .map(|ident| quote!(#ident))
+                    .unwrap_or_else(|| {
+                        let ident = field_info.field.ident.as_ref();
+                        quote!(&self.#ident)
+                    });
                 let tokens = v.to_validify_tokens(field_name, validator_param, false);
                 ValidationTokens::Normal(tokens)
             }
             Validator::In(v) => {
-                let ident = field_info.field.ident.as_ref();
-                let validator_param = quote!(&self.#ident);
+                let validator_param = field_info
+                    .ident_override
+                    .as_ref()
+                    .map(|ident| quote!(#ident))
+                    .unwrap_or_else(|| {
+                        let ident = field_info.field.ident.as_ref();
+                        quote!(&self.#ident)
+                    });
+
                 let tokens = v.to_validify_tokens(
                     field_name,
                     validator_param,
@@ -188,10 +168,10 @@ impl Validator {
                 let validator_param = quote!(el);
                 let inner_tokens = v.iter().map(|v| match v {
                     Validator::Iter(_) => {
-                        abort!(field_info.field.span(), "`iter` validator cannot be nested")
+                        abort!(field_info.field.span(), "`iter` validator cannot be nested.")
                     }
                     Validator::Nested => {
-                        abort!(field_info.field.span(), "`nested` is not valid in `iter`. To recursively validate collections, use `nested` directly on the field")
+                        abort!(field_info.field.span(), "`validate/validify` is not valid in `iter`. To validate collections of type T, use `validate/validify` directly on the field.")
                     },
                     Validator::Email(v) => {
                         v.to_validify_tokens(field_name.clone(), validator_param.clone(), true)
@@ -223,9 +203,6 @@ impl Validator {
                     Validator::Required(v) => {
                         v.to_validify_tokens(field_name.clone(), validator_param.clone(), true)
                     }
-                    Validator::MustMatch(v) => {
-                        v.to_validify_tokens(field_name.clone(), validator_param.clone(), true)
-                    }
                     Validator::Regex(v) => {
                         v.to_validify_tokens(field_name.clone(), validator_param.clone(), true)
                     }
@@ -237,25 +214,50 @@ impl Validator {
                     },
                     Validator::In(v) => v.to_validify_tokens(field_name.clone(), validator_param.clone(), false, true),
                 });
-                let ident = field_info.field.ident.as_ref();
+                let validator_param = field_info
+                    .ident_override
+                    .as_ref()
+                    .map(|ident| quote!(#ident))
+                    .unwrap_or_else(|| {
+                        let ident = field_info.field.ident.as_ref();
+                        if field_info.is_option() {
+                            return quote!(#ident);
+                        }
+                        quote!(self.#ident)
+                    });
+
                 let tokens = quote!(
-                    for (__i, el) in self.#ident.iter().enumerate() {
+                    for (__i, el) in #validator_param.iter().enumerate() {
                         #(#inner_tokens)*
                     }
                 );
-                ValidationTokens::Normal(tokens)
+                ValidationTokens::Normal(field_info.wrap_tokens_if_option(tokens))
             }
             Validator::Nested => {
-                let validator_field = field_info.quote_validator_field();
+                let validator_field = field_info
+                    .ident_override
+                    .as_ref()
+                    .map(|id| quote!(#id))
+                    .unwrap_or_else(|| {
+                        let ident = &field_info.field.ident;
+
+                        if field_info.is_option() || field_info.is_list() || field_info.is_map() {
+                            quote!(#ident)
+                        } else {
+                            quote!(self.#ident)
+                        }
+                    });
+
                 let field_name = field_info.name();
-                let quoted = quote!(
+
+                let tokens = quote!(
                     if let Err(mut errs) = #validator_field.validate() {
                         errs.errors_mut().iter_mut().for_each(|err| err.set_location(#field_name));
                         errors.merge(errs);
                     }
                 );
                 ValidationTokens::Nested(field_info.wrap_tokens_if_option(
-                    field_info.wrap_validator_if_collection(validator_field, quoted),
+                    field_info.wrap_validator_if_collection(validator_field, tokens),
                 ))
             }
         }
@@ -312,7 +314,8 @@ impl Length {
         } = self;
 
         let quoted_error = self.quote_error(&field_name);
-        let error_param = quote!(err.add_param("actual", &#validator_param.len()););
+        let error_param =
+            quote!(err.add_param("actual", &::validify::Length::length(&#validator_param)););
         let error_location = if in_iter {
             quote!(err.set_location_idx(__i, #field_name);)
         } else {
@@ -340,19 +343,19 @@ impl Length {
         let min_tokens = min
             .as_ref()
             .map(ValueOrPath::tokens)
-            .map(|x| quote!(Some(#x as u64)))
+            .map(|x| quote!(Some(#x as usize)))
             .unwrap_or(quote!(None));
 
         let max_tokens = max
             .as_ref()
             .map(ValueOrPath::tokens)
-            .map(|x| quote!(Some(#x as u64)))
+            .map(|x| quote!(Some(#x as usize)))
             .unwrap_or(quote!(None));
 
         let equal_tokens = equal
             .as_ref()
             .map(ValueOrPath::tokens)
-            .map(|x| quote!(Some(#x as u64)))
+            .map(|x| quote!(Some(#x as usize)))
             .unwrap_or(quote!(None));
 
         quote!(
@@ -588,32 +591,6 @@ impl Email {
     }
 }
 
-impl MustMatch {
-    fn to_validify_tokens(
-        &self,
-        field_name: String,
-        validator_param: TokenStream,
-        in_iter: bool,
-    ) -> TokenStream {
-        let MustMatch { ref value, .. } = self;
-        let quoted_error = self.quote_error(&field_name);
-        let error_location = if in_iter {
-            quote!(err.set_location_idx(__i, #field_name);)
-        } else {
-            quote!(err.set_location(#field_name);)
-        };
-        quote!(
-            if !::validify::validate_must_match(#validator_param, &self.#value) {
-                #quoted_error
-                err.add_param("actual", #validator_param);
-                err.add_param("target", &self.#value);
-                #error_location
-                errors.add(err);
-            }
-        )
-    }
-}
-
 impl Regex {
     fn to_validify_tokens(
         &self,
@@ -649,7 +626,9 @@ impl In {
         in_iter: bool,
     ) -> TokenStream {
         let In { ref expr, not, .. } = self;
+
         let quoted_error = self.quote_error(&field_name);
+
         let error_location = if in_iter {
             quote!(err.set_location_idx(__i, #field_name);)
         } else {
@@ -659,7 +638,7 @@ impl In {
         if is_option {
             quote!(
                 if let Some(ref param) = #validator_param {
-                    if !::validify::validate_in(&#expr, &param, #not) {
+                    if !::validify::validate_contains(&#expr, &param, #not) {
                         #quoted_error
                         #error_location
                         errors.add(err);
@@ -668,7 +647,7 @@ impl In {
             )
         } else {
             quote!(
-                if !::validify::validate_in(&#expr, &#validator_param, #not) {
+                if !::validify::validate_contains(&#expr, &#validator_param, #not) {
                     #quoted_error
                     #error_location
                     errors.add(err);
@@ -693,18 +672,12 @@ impl Contains {
             quote!(err.set_location(#field_name);)
         };
 
-        let validation_val = if matches!(value, Some(ValueOrPath::Value(syn::Lit::Str(_)))) {
-            quote!(String::from(#value))
-        } else {
-            quote!(#value)
-        };
-
         // Only add the target if it's a literal since otherwise it will just be the variable name
         let added_param = matches!(value, Some(ValueOrPath::Value(_)))
             .then_some(quote!(err.add_param("target", &#value);));
 
         quote!(
-            if !::validify::validate_contains(#validator_param, &#validation_val, #not) {
+            if !::validify::validate_contains(#validator_param, &#value, #not) {
                 #quoted_error
                 #added_param
                 #error_location

@@ -212,26 +212,6 @@ fn regex_iter_works() {
 }
 
 #[test]
-fn must_match_iter_works() {
-    #[derive(Debug, Validate)]
-    struct IterTest {
-        #[validate(iter(must_match(target)))]
-        test: Vec<String>,
-        target: String,
-    }
-
-    let test = IterTest {
-        test: vec![String::from("foo"), String::from("bar")],
-        target: String::from("foo"),
-    };
-    let res = test.validate();
-    let errors = res.unwrap_err();
-    let error = &errors.errors()[0];
-    assert_eq!("/test/1", error.location());
-    assert_eq!("must_match", error.code());
-}
-
-#[test]
 fn length_iter_works() {
     #[derive(Debug, Validate)]
     struct IterTest {
@@ -333,7 +313,7 @@ fn contains_not_iter_works() {
 
 #[test]
 fn in_not_in_iter_works() {
-    const NUMS: &[usize] = &[1, 2, 3];
+    const NUMS: [usize; 3] = [1, 2, 3];
 
     #[derive(Debug, Validate)]
     struct IterTest {
@@ -380,4 +360,26 @@ fn time_iter_works() {
     let error = &errors.errors()[0];
     assert_eq!("/test/1", error.location());
     assert_eq!("before_or_equal", error.code());
+}
+
+#[test]
+fn iter_works_with_option() {
+    #[derive(Debug, Validate)]
+    struct IterTest {
+        #[validate(iter(email))]
+        test: Option<Vec<String>>,
+    }
+
+    let test = IterTest { test: None };
+    let res = test.validate();
+    assert!(res.is_ok());
+
+    let test = IterTest {
+        test: Some(vec![String::from("foo")]),
+    };
+    let res = test.validate();
+    let errors = res.unwrap_err();
+    let error = &errors.errors()[0];
+    assert_eq!("/test/0", error.location());
+    assert_eq!("email", error.code());
 }

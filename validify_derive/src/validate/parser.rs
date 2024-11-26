@@ -1,8 +1,7 @@
 use super::validation::{
-    Contains, CreditCard, Custom, Email, In, Ip, Length, MustMatch, NonControlChar, Phone, Range,
-    Regex, Required, Time, TimeMultiplier, TimeOp, Url,
+    Contains, CreditCard, Custom, Email, In, Ip, Length, NonControlChar, Phone, Range, Regex,
+    Required, Time, TimeMultiplier, TimeOp, Url,
 };
-use proc_macro2::Span;
 use proc_macro_error::abort;
 use quote::quote;
 use quote::ToTokens;
@@ -218,41 +217,6 @@ pub fn parse_contains_full(meta: &ParseNestedMeta, not: bool) -> Result<Contains
 
     if validation.value.is_none() {
         abort!(meta.input.span(), "Contains validation must have a value")
-    }
-
-    Ok(validation)
-}
-
-pub fn parse_must_match_full(meta: &ParseNestedMeta) -> Result<MustMatch, syn::Error> {
-    let mut validation = MustMatch {
-        value: syn::Ident::new("BAD_____NO_____BAD", Span::call_site()),
-        code: None,
-        message: None,
-    };
-
-    meta.parse_nested_meta(|meta| {
-        if meta.path.is_ident("value") {
-            let content = meta.value()?;
-            match content.parse::<syn::Ident>() {
-                Ok(id) => {
-                    validation.value = id;
-                }
-                Err(_) => {
-                    return Err(meta.error(
-                        "must_match value must be a field identifier for the current struct",
-                    ))
-                }
-            }
-            return Ok(());
-        }
-
-        code_and_message!(validation, meta);
-
-        Err(meta.error("Unrecognized contains parameter, accepted are: value, code, message"))
-    })?;
-
-    if validation.value.to_string().as_str() == "BAD_____NO_____BAD" {
-        abort!(meta.input.span(), "must_match validation must have a value")
     }
 
     Ok(validation)

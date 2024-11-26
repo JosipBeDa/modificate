@@ -1,9 +1,10 @@
 use super::modifier::Modifier;
-use crate::tokens::quote_field_modifiers;
-use crate::{fields::FieldInfo, validate::r#impl::impl_validate};
+use crate::fields::{Fields, Variants};
+use crate::validate::r#impl::impl_validate;
 use proc_macro_error::abort;
 use quote::quote;
 use syn::parenthesized;
+use syn::spanned::Spanned;
 
 const TRIM_MODIFIER: &str = "trim";
 const CUSTOM_MODIFIER: &str = "custom";
@@ -17,43 +18,88 @@ const MODIFY: &str = "modify";
 pub fn impl_validify(input: &syn::DeriveInput) -> proc_macro2::TokenStream {
     let ident = &input.ident;
 
-    let field_info = FieldInfo::collect(input);
+    match input.data {
+        syn::Data::Struct(ref data_struct) => {
+            let fields = Fields::collect(&input.attrs, &data_struct.fields);
 
-    let (modifiers, nested_validifies) = quote_field_modifiers(field_info);
+            let modifiers = fields.to_modify_tokens();
 
-    let validate_impl = impl_validate(input);
+            let validate_impl = impl_validate(input);
 
-    let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
+            let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
-    quote!(
+            quote!(
+                #validate_impl
 
-    #validate_impl
+                impl #impl_generics ::validify::Modify for #ident #ty_generics #where_clause {
+                    fn modify(&mut self) {
+                        #(#modifiers)*
+                    }
+                }
 
-    impl #impl_generics ::validify::Modify for #ident #ty_generics #where_clause {
-        fn modify(&mut self) {
-            #(#modifiers)*
+                impl #impl_generics ::validify::Validify for #ident #ty_generics #where_clause {
+                    fn validify(&mut self) -> Result<(), ::validify::ValidationErrors> {
+                        let mut errors = ::validify::ValidationErrors::new();
+
+                        <Self as ::validify::Modify>::modify(self);
+
+                        if let Err(errs) = <Self as ::validify::Validate>::validate(self) {
+                            errors.merge(errs);
+                        }
+
+                        if !errors.is_empty() {
+                            Err(errors)
+                        } else {
+                            Ok(())
+                        }
+                    }
+                }
+            )
         }
+        syn::Data::Enum(ref data_enum) => {
+            let variants = Variants::collect(data_enum);
+
+            let modifiers = variants.to_modify_tokens();
+
+            let validate_impl = impl_validate(input);
+
+            let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
+
+            quote!(
+                #validate_impl
+
+                impl #impl_generics ::validify::Modify for #ident #ty_generics #where_clause {
+                    fn modify(&mut self) {
+                        match self {
+                            #(#modifiers)*
+                        }
+                    }
+                }
+
+                impl #impl_generics ::validify::Validify for #ident #ty_generics #where_clause {
+                    fn validify(&mut self) -> Result<(), ::validify::ValidationErrors> {
+                        let mut errors = ::validify::ValidationErrors::new();
+
+                        <Self as ::validify::Modify>::modify(self);
+
+                        if let Err(errs) = <Self as ::validify::Validate>::validate(self) {
+                            errors.merge(errs);
+                        }
+
+                        if !errors.is_empty() {
+                            Err(errors)
+                        } else {
+                            Ok(())
+                        }
+                    }
+                }
+            )
+        }
+        syn::Data::Union(_) => abort!(
+            input.span(),
+            "#[derive(Validate)] can only be used on structs with named fields or enums"
+        ),
     }
-
-    impl #impl_generics ::validify::Validify for #ident #ty_generics #where_clause {
-        fn validify(&mut self) -> Result<(), ::validify::ValidationErrors> {
-            let mut errors = ::validify::ValidationErrors::new();
-
-            #(#nested_validifies)*
-
-            <Self as ::validify::Modify>::modify(self);
-
-            if let Err(errs) = <Self as ::validify::Validate>::validate(self) {
-                errors.merge(errs);
-            }
-
-            if !errors.is_empty() {
-                Err(errors)
-            } else {
-                Ok(())
-            }
-        }
-    })
 }
 
 pub fn collect_modifiers(field: &syn::Field) -> Vec<Modifier> {

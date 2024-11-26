@@ -313,7 +313,6 @@ fn vec_custom_serde() {
     let res =
         TestQuery::validify_from(serde_json::from_str::<TestQueryPayload>(&json).unwrap()).unwrap();
 
-    dbg!(&res.languages_used);
     assert!(res.page.is_none());
     assert!(res.per_page.is_none());
     assert!(res.languages_used.is_empty());

@@ -1,5 +1,13 @@
 # Changelog
 
+- ## 2.0.0
+
+- Enum validation.
+- Removes `must_match` validation due to quirks with enums in favor of much simpler `schema` validation.
+- Rename `HasLen` trait to `Length`.
+- Refactor `Contains` to take in generic and implement on common types.
+- Fixes some invalid attribute matching.
+
 - ## 1.4.0
 
 - Add new validator - `iter`.

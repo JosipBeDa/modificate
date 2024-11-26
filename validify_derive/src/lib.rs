@@ -9,13 +9,14 @@ mod tokens;
 mod validate;
 mod validify;
 
-/// Combines `Validate` and `Modify` in one trait and provides the intermediary payload struct.
+/// Implements `Validate` and `Modify` in one trait.
 ///
-/// Deriving this will allow you to annotate fields with the `modify` attribute. Modifiers are simple functions that modify
-/// the struct before validation. You can use the few out of the box ones or create your own.
+/// Deriving this will allow you to annotate fields with `modify` attributes, in addition to `validate`.
+/// Modifiers are simple functions that modify the struct before validation.
+/// You can use the few out of the box ones or create your own.
 ///
 /// Visit the [repository](https://github.com/biblius/validify) to see the list of available validations and
-/// modifiers as well as more examples.
+/// modifiers, as well as more examples.
 ///
 ///  ### Example
 ///
@@ -83,7 +84,11 @@ pub fn derive_validify(input: proc_macro::TokenStream) -> proc_macro::TokenStrea
     validify::r#impl::impl_validify(&ast).into()
 }
 
-/// Derives `Validate` based on the provided field attributes.
+/// Enables the use of `#[validate]` attributes on struct/enum fields and
+/// implements the `Validate` trait based on the provided attributes.
+///
+/// Visit the [repository](https://github.com/biblius/validify) to see the list of available validations and
+/// modifiers, as well as more examples.
 ///
 /// ### Example
 ///
@@ -143,12 +148,12 @@ pub fn derive_validate(input: proc_macro::TokenStream) -> proc_macro::TokenStrea
     validate::r#impl::impl_validate(&input).into()
 }
 
-/// A shortcut for ergonomic error creation in custom schema validator functions.
+/// A shortcut for ergonomic error creation in custom schema validaton functions.
 ///
 /// Prepends a `let mut errors = ValidationErrors::new()` to the beginning of the function block,
 /// and appends a `if errors.is_empty() { Ok(()) } else { Err(errors) }` to the end.
 ///
-/// Designed to be used in conjuction with the `field_err` and `schema_err` macros.
+/// Designed to be used in conjuction with the `schema_err` macro.
 ///
 /// ```ignore
 /// use validify::{ValidationErrors, Validify, schema_validation, schema_err};
@@ -218,7 +223,7 @@ pub fn schema_validation(
 /// The payload struct is Deserializable, has `From` and `Into` impls for
 /// the original, and implements `Validate`.
 ///
-/// The origianl struct gets a `ValidatePayload` implementation with 2 associated functions;
+/// The original struct gets a `ValidatePayload` implementation with 2 associated functions;
 ///
 /// `validify_from` which will validate the payload and call `Validify` on the original,
 ///
@@ -227,11 +232,11 @@ pub fn schema_validation(
 /// `validate_from` which does the same, but calls `Validate` instead of `Validify`
 /// on the original.
 ///
-/// Both functions return the original struct and are the preferred way of handling payloads in e.g.,
-/// request handlers.
+/// Both functions return the original struct if the validation succeeds.
 ///
 /// The payload can be used to represent a completely deserializable version of the struct
 /// even when some fields are missing.
+///
 /// This can be used for more detailed descriptions of what fields are missing, along
 /// with any other validation errors.
 ///
@@ -262,6 +267,30 @@ pub fn derive_payload(input: proc_macro::TokenStream) -> proc_macro::TokenStream
     payload::r#impl::impl_payload(&input).into()
 }
 
+/// Designed to be used with the [schema_validation] macro.
+/// Used for ergonomic custom error handling.
+///
+/// Adds a schema validaton error to the generated `ValidationErrors`.
+///
+/// The errors argument should pass in an instance of `ValidationErrors`,
+/// and usually is used with the one generated from `schema_validation`.
+///
+/// Schema errors always have a location of "/".
+///
+/// Accepts:
+///
+/// `("code")`
+/// `("code", "custom message")`
+#[proc_macro]
+pub fn schema_err(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let SchemaErr { code, message } = syn::parse(input).expect("invalid tokens");
+    let message = message.map(|m| quote!(.with_message(#m.to_string())));
+    quote!(
+        errors.add(::validify::ValidationError::new_schema(#code) #message);
+    )
+    .into()
+}
+
 struct SchemaErr {
     code: LitStr,
     message: Option<LitStr>,
@@ -290,25 +319,4 @@ impl Parse for SchemaErr {
 
         Ok(SchemaErr { code, message })
     }
-}
-
-/// Designed to be used with the [schema_validation] macro. Used for ergonomic custom error handling.
-///
-/// Adds a schema validaton error to the generated `ValidationErrors`.
-///
-/// The errors argument should pass in an instance of `ValidationErrors`,
-/// and usually is used with the one generated from `schema_validation`.
-///
-/// Accepts:
-///
-/// `("code")`
-/// `("code", "custom message")`
-#[proc_macro]
-pub fn schema_err(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    let SchemaErr { code, message } = syn::parse(input).expect("invalid tokens");
-    let message = message.map(|m| quote!(.with_message(#m.to_string())));
-    quote!(
-        errors.add(::validify::ValidationError::new_schema(#code) #message);
-    )
-    .into()
 }

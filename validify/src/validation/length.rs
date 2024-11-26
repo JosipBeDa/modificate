@@ -1,16 +1,15 @@
-use crate::traits::HasLen;
+use crate::traits::Length;
 
 /// Validates the length of the value given.
+///
 /// If the validator has `equal` set, it will ignore any `min` and `max` value.
 ///
-/// If you apply it on String, don't forget that the length can be different
-/// from the number of visual characters for Unicode
-#[must_use]
-pub fn validate_length<T: HasLen>(
+/// See the [Length] trait for more details.
+pub fn validate_length<T: Length>(
     value: T,
-    min: Option<u64>,
-    max: Option<u64>,
-    equal: Option<u64>,
+    min: Option<usize>,
+    max: Option<usize>,
+    equal: Option<usize>,
 ) -> bool {
     let val_length = value.length();
 

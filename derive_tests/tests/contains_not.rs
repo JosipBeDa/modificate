@@ -60,7 +60,7 @@ fn string_containing_needle_fails_validation() {
 }
 
 #[test]
-fn vec_containing_needle_fails_validation() {
+fn vec_containing_needle_usize_fails_validation() {
     #[derive(Debug, Validate)]
     struct TestStruct {
         #[validate(contains_not(4))]
@@ -76,6 +76,27 @@ fn vec_containing_needle_fails_validation() {
     assert_eq!(errs[0].code(), "contains_not");
     assert_eq!(errs[0].location(), "/val");
     assert_eq!(errs[0].params()["target"], 4);
+}
+
+#[test]
+fn vec_containing_needle_string_fails_validation() {
+    #[derive(Debug, Validate)]
+    struct TestStruct {
+        #[validate(contains_not("foo"))]
+        val: Vec<String>,
+    }
+
+    let s = TestStruct {
+        val: vec!["foo".to_string()],
+    };
+    let res = s.validate();
+    assert!(res.is_err());
+    let err = res.unwrap_err();
+    let errs = err.field_errors();
+    assert_eq!(errs.len(), 1);
+    assert_eq!(errs[0].code(), "contains_not");
+    assert_eq!(errs[0].location(), "/val");
+    assert_eq!(errs[0].params()["target"], "foo");
 }
 
 #[test]

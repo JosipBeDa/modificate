@@ -16,14 +16,12 @@ impl Modifier {
     /// Necessary because we need both in case a nested validify occurs. In that case, the first element will have the
     /// necessary modification tokens for nested elements in the `Modify` impl while the second will have the tokens
     /// for the `Validify` impl.
-    pub fn to_validify_tokens(
-        &self,
-        field_info: &FieldInfo,
-    ) -> (proc_macro2::TokenStream, Option<proc_macro2::TokenStream>) {
-        let param = field_info.quote_modifier_param();
+    pub fn to_validify_tokens(&self, field_info: &FieldInfo) -> proc_macro2::TokenStream {
+        let param = field_info.modifier_param_tokens();
+
         match self {
             Modifier::Trim => {
-                let tokens = if field_info.is_option() {
+                let tokens = if field_info.ident_override.is_some() || field_info.is_option() {
                     quote!(
                         *#param = #param.trim().to_string();
                     )
@@ -32,15 +30,12 @@ impl Modifier {
                         #param = #param.trim().to_string();
                     )
                 };
-                (
-                    field_info.wrap_modifier_if_option(
-                        field_info.wrap_modifier_if_collection(param, tokens, self),
-                    ),
-                    None,
+                field_info.wrap_modifier_if_option(
+                    field_info.wrap_modifier_if_collection(param, tokens, self),
                 )
             }
             Modifier::Uppercase => {
-                let tokens = if field_info.is_option() {
+                let tokens = if field_info.ident_override.is_some() || field_info.is_option() {
                     quote!(
                         *#param = #param.to_uppercase();
                     )
@@ -49,15 +44,12 @@ impl Modifier {
                         #param = #param.to_uppercase();
                     )
                 };
-                (
-                    field_info.wrap_modifier_if_option(
-                        field_info.wrap_modifier_if_collection(param, tokens, self),
-                    ),
-                    None,
+                field_info.wrap_modifier_if_option(
+                    field_info.wrap_modifier_if_collection(param, tokens, self),
                 )
             }
             Modifier::Lowercase => {
-                let tokens = if field_info.is_option() {
+                let tokens = if field_info.ident_override.is_some() || field_info.is_option() {
                     quote!(
                         *#param = #param.to_lowercase();
                     )
@@ -66,15 +58,12 @@ impl Modifier {
                         #param = #param.to_lowercase();
                     )
                 };
-                (
-                    field_info.wrap_modifier_if_option(
-                        field_info.wrap_modifier_if_collection(param, tokens, self),
-                    ),
-                    None,
+                field_info.wrap_modifier_if_option(
+                    field_info.wrap_modifier_if_collection(param, tokens, self),
                 )
             }
             Modifier::Capitalize => {
-                let tokens = if field_info.is_option() {
+                let tokens = if field_info.ident_override.is_some() || field_info.is_option() {
                     quote!(
                       *#param = ::std::format!("{}{}", &#param[0..1].to_uppercase(), &#param[1..]);
                     )
@@ -83,15 +72,12 @@ impl Modifier {
                       #param = ::std::format!("{}{}", &#param[0..1].to_uppercase(), &#param[1..]);
                     )
                 };
-                (
-                    field_info.wrap_modifier_if_option(
-                        field_info.wrap_modifier_if_collection(param, tokens, self),
-                    ),
-                    None,
+                field_info.wrap_modifier_if_option(
+                    field_info.wrap_modifier_if_collection(param, tokens, self),
                 )
             }
             Modifier::Custom { function } => {
-                let tokens = if field_info.is_option() {
+                let tokens = if field_info.ident_override.is_some() || field_info.is_option() {
                     quote!(
                         #function(#param);
                     )
@@ -100,12 +86,9 @@ impl Modifier {
                         #function(&mut #param);
                     )
                 };
-                (field_info.wrap_modifier_if_option(tokens), None)
+                field_info.wrap_modifier_if_option(tokens)
             }
             Modifier::Nested => {
-                let par = param.to_string();
-                let field = par.split('.').last().unwrap();
-
                 let modifications = if field_info.is_list() {
                     quote!(
                         for el in #param.iter_mut() {
@@ -116,37 +99,7 @@ impl Modifier {
                     quote!(#param.modify();)
                 };
 
-                let field_ident: proc_macro2::TokenStream =
-                    format!("self.{field}").parse().unwrap();
-
-                let param = if field_info.is_option() {
-                    let field: proc_macro2::TokenStream = field.parse().unwrap();
-                    field
-                } else {
-                    field_ident
-                };
-
-                let nested_validifies = if field_info.is_list() {
-                    quote!(
-                        for (i, el) in #param.iter_mut().enumerate() {
-                            if let Err(mut errs) = el.validify() {
-                                errs.errors_mut().iter_mut().for_each(|err|err.set_location_idx(i, #field));
-                                errors.merge(errs);
-                            }
-                        }
-                    )
-                } else {
-                    quote!(
-                        if let Err(mut err) = #param.validify() {
-                            err.errors_mut().iter_mut().for_each(|e| e.set_location(#field));
-                            errors.merge(err);
-                        }
-                    )
-                };
-                (
-                    field_info.wrap_modifier_if_option(modifications),
-                    Some(field_info.wrap_modifier_if_option(nested_validifies)),
-                )
+                field_info.wrap_modifier_if_option(modifications)
             }
         }
     }

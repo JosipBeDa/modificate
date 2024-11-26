@@ -53,9 +53,9 @@ fn field_err() {
     assert_eq!(err.message().unwrap(), "bar");
     assert!(err.field_name().is_none());
 
-    let err = field_err!("field", "foo", "bar");
+    let err = field_err!("foo", "bar", "field");
     assert_eq!(err.code(), "foo");
     assert_eq!(err.message().unwrap(), "bar");
     assert_eq!(err.field_name().unwrap(), "field");
-    assert_eq!(err.location(), "");
+    assert_eq!(err.location(), "/field");
 }

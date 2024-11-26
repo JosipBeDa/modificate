@@ -200,7 +200,6 @@ pub fn find_rename(field: &syn::Field) -> Option<String> {
                 let content;
                 parenthesized!(content in meta.input);
 
-                // Covers `rename_all(deserialize = "something")`
                 let name_values =
                     Punctuated::<syn::MetaNameValue, Token![,]>::parse_separated_nonempty(
                         &content,

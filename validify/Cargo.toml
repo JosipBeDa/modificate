@@ -7,12 +7,12 @@ description = "Provides struct validation and modification functionality through
 edition = "2021"
 exclude = ["derive_tests/"]
 homepage = "https://github.com/biblius/validify"
-keywords = ["modify", "payload", "validate", "validify"]
+keywords = ["validate", "modify", "validify"]
 license = "MIT"
 name = "validify"
 readme = "../README.md"
 repository = "https://github.com/biblius/validify"
-version = "1.4.0"
+version = "2.0.0"
 
 
 [dependencies]
@@ -27,5 +27,5 @@ serde = { version = "1.0.152", features = ["derive"] }
 serde_json = "1"
 unic-ucd-common = { version = "0.9" }
 url = "2.3.1"
-validify_derive = { version = "1.4.0" }
-#validify_derive = { path = "../validify_derive" }
+#validify_derive = { version = "2.0.0" }
+validify_derive = { path = "../validify_derive" }

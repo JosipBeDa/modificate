@@ -1,11 +1,10 @@
 use super::parser::*;
 use super::validation::{
-    Contains, CreditCard, Custom, Email, In, Ip, MustMatch, NonControlChar, Phone, Regex, Required,
+    Contains, CreditCard, Custom, Email, In, Ip, NonControlChar, Phone, Regex, Required,
     SchemaValidation, Url, Validator,
 };
-use crate::fields::FieldInfo;
-use crate::tokens::quote_field_validations;
-use crate::tokens::quote_schema_validations;
+use crate::fields::{Fields, Variants};
+use crate::tokens::quote_schema_validation;
 use crate::validate::ValidationMeta;
 use proc_macro_error::abort;
 use quote::quote;
@@ -20,7 +19,6 @@ const EMAIL: &str = "email";
 const URL: &str = "url";
 const LENGTH: &str = "length";
 const RANGE: &str = "range";
-const MUST_MATCH: &str = "must_match";
 const CONTAINS: &str = "contains";
 const CONTAINS_NOT: &str = "contains_not";
 const NON_CONTROL_CHAR: &str = "non_control_char";
@@ -35,38 +33,73 @@ const IP: &str = "ip";
 const TIME: &str = "time";
 const ITER: &str = "iter";
 
+/// Entrypoint for `#[derive(Validate)]`.
 pub fn impl_validate(input: &syn::DeriveInput) -> proc_macro2::TokenStream {
     let ident = &input.ident;
 
-    let field_info = FieldInfo::collect(input);
-    let validations = quote_field_validations(field_info);
+    match input.data {
+        syn::Data::Struct(ref data_struct) => {
+            let fields = Fields::collect(&input.attrs, &data_struct.fields);
+            let field_validation = fields.to_validate_tokens();
 
-    let struct_validations = collect_struct_validation(&input.attrs).unwrap();
-    let schema_validations = quote_schema_validations(&struct_validations);
+            let schema_validation = collect_schema_validation(&input.attrs).unwrap();
+            let schema_validation = quote_schema_validation(&schema_validation);
 
-    let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
+            let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
-    quote!(
-        impl #impl_generics ::validify::Validate for #ident #ty_generics #where_clause {
-            fn validate(&self) -> ::std::result::Result<(), ::validify::ValidationErrors> {
-                let mut errors = ::validify::ValidationErrors::new();
+            quote!(
+                impl #impl_generics ::validify::Validate for #ident #ty_generics #where_clause {
+                    fn validate(&self) -> ::std::result::Result<(), ::validify::ValidationErrors> {
+                        let mut errors = ::validify::ValidationErrors::new();
 
-                #(#validations)*
+                        #(#field_validation)*
 
-                #(#schema_validations)*
+                        #(#schema_validation)*
 
-                if errors.is_empty() {
-                    ::std::result::Result::Ok(())
-                } else {
-                    ::std::result::Result::Err(errors)
+                        if errors.is_empty() {
+                            ::std::result::Result::Ok(())
+                        } else {
+                            ::std::result::Result::Err(errors)
+                        }
+                    }
                 }
-            }
+            )
         }
-    )
+        syn::Data::Enum(ref data_enum) => {
+            let variant_validation = Variants::collect(data_enum).to_validate_tokens();
+
+            let schema_validation = collect_schema_validation(&input.attrs).unwrap();
+            let schema_validation = quote_schema_validation(&schema_validation);
+
+            let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
+
+            quote!(
+                impl #impl_generics ::validify::Validate for #ident #ty_generics #where_clause {
+                    fn validate(&self) -> ::std::result::Result<(), ::validify::ValidationErrors> {
+                        let mut errors = ::validify::ValidationErrors::new();
+
+                        #variant_validation
+
+                        #(#schema_validation)*
+
+                        if errors.is_empty() {
+                            ::std::result::Result::Ok(())
+                        } else {
+                            ::std::result::Result::Err(errors)
+                        }
+                    }
+                }
+            )
+        }
+        syn::Data::Union(_) => abort!(
+            input.span(),
+            "#[derive(Validate)] can only be used on structs with named fields or enums"
+        ),
+    }
 }
 
-/// Find if a struct has some schema validation and returns the info if so
-fn collect_struct_validation(
+/// Find if a struct or enum has some schema validation and returns the info if so.
+fn collect_schema_validation(
     attrs: &[syn::Attribute],
 ) -> Result<Vec<SchemaValidation>, syn::Error> {
     let mut validations = vec![];
@@ -82,10 +115,11 @@ fn collect_struct_validation(
             Ok(())
         })?;
     }
+
     Ok(validations)
 }
 
-pub fn collect_validations(field: &syn::Field) -> Vec<Validator> {
+pub fn collect_validation(field: &syn::Field) -> Vec<Validator> {
     let mut validators = vec![];
 
     for attr in field.attrs.iter() {
@@ -97,7 +131,7 @@ pub fn collect_validations(field: &syn::Field) -> Vec<Validator> {
             let syn::Meta::Path(_) = attr.meta else {
                 abort!(
                     attr.meta.span(),
-                    "Validate must be applied as a list, i.e. `validate(/*...*/)` or as a path `validate` for nested validation"
+                    "Validate must be applied as a list `#[validate(/*...*/)]` or as a path `#[validate]` for nested validation"
                 )
             };
             validators.push(Validator::Nested);
@@ -160,23 +194,8 @@ fn parse_single_validation(
         return Ok(());
     }
 
-    if meta.path.is_ident(MUST_MATCH) {
-        if meta.is_single_path("must_match") {
-            let content;
-            parenthesized!(content in meta.input);
-            let Ok(id) = content.parse::<syn::Ident>() else {
-                return Err(meta.error("Invalid value given for `must_match` validation, must be a field on the current struct"));
-            };
-            validators.push(Validator::MustMatch(MustMatch::new(id)));
-        } else {
-            let validation = parse_must_match_full(&meta)?;
-            validators.push(Validator::MustMatch(validation));
-        }
-        return Ok(());
-    }
-
     if meta.path.is_ident(CONTAINS) {
-        if meta.is_single_lit("contains") {
+        if meta.is_single_lit(CONTAINS) {
             let content;
             parenthesized!(content in meta.input);
             let Ok(lit) = content.parse::<syn::Lit>() else {
@@ -188,7 +207,7 @@ fn parse_single_validation(
                 ValueOrPath::Value(lit),
                 false,
             )));
-        } else if meta.is_single_path("contains") {
+        } else if meta.is_single_path(CONTAINS) {
             let content;
             parenthesized!(content in meta.input);
             let Ok(path) = content.parse::<syn::Path>() else {
@@ -208,7 +227,7 @@ fn parse_single_validation(
     }
 
     if meta.path.is_ident(CONTAINS_NOT) {
-        if meta.is_single_lit("contains_not") {
+        if meta.is_single_lit(CONTAINS_NOT) {
             let content;
             parenthesized!(content in meta.input);
             let Ok(lit) = content.parse::<syn::Lit>() else {
@@ -220,7 +239,7 @@ fn parse_single_validation(
                 ValueOrPath::Value(lit),
                 true,
             )));
-        } else if meta.is_single_path("contains") {
+        } else if meta.is_single_path(CONTAINS_NOT) {
             let content;
             parenthesized!(content in meta.input);
             let Ok(path) = content.parse::<syn::Path>() else {
@@ -250,7 +269,7 @@ fn parse_single_validation(
     }
 
     if meta.path.is_ident(CUSTOM) {
-        if meta.is_single_path("custom") {
+        if meta.is_single_path(CUSTOM) {
             let content;
             parenthesized!(content in meta.input);
             let Ok(function) = content.parse::<syn::Path>() else {
@@ -265,7 +284,7 @@ fn parse_single_validation(
     }
 
     if meta.path.is_ident(REGEX) {
-        if meta.is_single_path("regex") {
+        if meta.is_single_path(REGEX) {
             let content;
             parenthesized!(content in meta.input);
             let Ok(path) = content.parse::<syn::Path>() else {
@@ -312,7 +331,7 @@ fn parse_single_validation(
     }
 
     if meta.path.is_ident(IS_IN) {
-        if meta.is_single_path("in") {
+        if meta.is_single_path(IS_IN) || meta.is_single_lit(IS_IN) {
             let content;
             parenthesized!(content in meta.input);
             let Ok(expr) = content.parse::<syn::Expr>() else {
@@ -329,7 +348,7 @@ fn parse_single_validation(
     }
 
     if meta.path.is_ident(NOT_IN) {
-        if meta.is_single_path("in") {
+        if meta.is_single_path(NOT_IN) {
             let content;
             parenthesized!(content in meta.input);
             let Ok(expr) = content.parse::<syn::Expr>() else {

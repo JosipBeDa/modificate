@@ -1,4 +1,4 @@
-use validify::Validate;
+use validify::{traits::Contains, Validate};
 
 #[test]
 fn can_validate_contains_ok() {
@@ -89,7 +89,7 @@ fn validates_struct_vec() {
     assert_eq!(errs.len(), 1);
     assert_eq!(errs[0].code(), "contains");
     assert_eq!(errs[0].location(), "/val");
-    assert!(errs[0].params().get("target").is_none());
+    assert!(!errs[0].params().contains_key("target"));
 
     let s = TestStruct {
         val: vec![
@@ -134,4 +134,41 @@ fn can_specify_message_for_contains() {
     let errs = err.field_errors();
     assert_eq!(errs.len(), 1);
     assert_eq!(errs[0].clone().message().unwrap(), "oops");
+}
+
+#[test]
+fn works_with_custom_type() {
+    #[derive(Debug, Validate)]
+    struct Container {
+        #[validate(contains(value = 3, message = "oops"))]
+        val: Containee,
+    }
+
+    #[derive(Debug)]
+    struct Containee {
+        x: usize,
+    }
+
+    impl Contains<usize> for Containee {
+        fn has_element(&self, needle: &usize) -> bool {
+            self.x == *needle
+        }
+    }
+
+    let s = Container {
+        val: Containee { x: 3 },
+    };
+
+    assert!(s.validate().is_ok());
+
+    let s = Container {
+        val: Containee { x: 4 },
+    };
+    let res = s.validate();
+    assert!(res.is_err());
+    let err = res.unwrap_err();
+    let errs = err.field_errors();
+    assert_eq!(errs.len(), 1);
+    assert_eq!(errs[0].message().unwrap(), "oops");
+    assert_eq!(errs[0].code(), "contains");
 }
